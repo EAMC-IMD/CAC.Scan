@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 #nullable enable
@@ -61,6 +61,7 @@ namespace CAC {
     }
     public enum ScanStatus {
         Success,
+        Limited,
         UnknownDataFormat,
         UnsupportedCard,
         InvalidScanData,
@@ -146,8 +147,8 @@ namespace CAC {
         //    {'Y', PersonCategoryCode.CivilianRetired }
         //};
         private char? _version;
-        private readonly string? _pdi;
-        private readonly PersonDesignatorTypeCode? _pdtc;
+        //private readonly string? _pdi;
+        //private readonly PersonDesignatorTypeCode? _pdtc;
         private string? _edipi;
         private string? _firstname;
         private char? _middleinitial;
@@ -166,8 +167,8 @@ namespace CAC {
         private readonly ScanStatus _scanStatus;
 
         public char? Version => _version;
-        public string? Pdi => _pdi;
-        public PersonDesignatorTypeCode? PersonDesignatorType => _pdtc;
+        //public string? Pdi => _pdi;
+        //public PersonDesignatorTypeCode? PersonDesignatorType => _pdtc;
         public string? Edipi => _edipi;
         public string? FirstName => _firstname;
         public char? MiddleInitial => _middleinitial;
@@ -216,10 +217,29 @@ namespace CAC {
                     return TestResult.InvalidLength;
             }
         }
-        public Scan(string scan) {
+
+        private string InvertCase(string input) {
+            char[] chars = input.ToCharArray();
+            for (int i = 0; i < chars.Length; i++) {
+                if (Char.IsLetter(chars[i])) {
+                    if (Char.IsUpper(chars[i])) {
+                        chars[i] = Char.ToLower(chars[i]);
+                    } else {
+                        chars[i] = Char.ToUpper(chars[i]);
+                    }
+                }
+            }
+            return new string(chars);
+        }
+
+        public Scan(string scan, bool limited = false) {
             if (String.IsNullOrEmpty(scan)) {
                 _scanStatus = ScanStatus.NullInput;
                 return;
+            }
+            scan = scan.Trim();
+            if (Char.IsLower(scan.ToCharArray()[0])) {
+                scan = InvertCase(scan);
             }
             switch (scan.Length) {
                 case int n when (n < 18):
@@ -254,10 +274,12 @@ namespace CAC {
             }
             if (_type == BarcodeType.PDF417N && !ParsePDF417N(scan.ToCharArray())) {
                 _scanStatus = ScanStatus.InvalidScanData;
+                if (limited && _firstname != null) _scanStatus = ScanStatus.Limited;
                 return;
             }
             if (_type == BarcodeType.PDF417M && !ParsePDF417M(scan.ToCharArray())) {
                 _scanStatus = ScanStatus.InvalidScanData;
+                if (limited && _firstname != null) _scanStatus = ScanStatus.Limited;
                 return;
             }
             _scanStatus = ScanStatus.Success;
@@ -316,8 +338,9 @@ namespace CAC {
             }
             return succeed;
         }
-        private bool ParsePDF417N(char[] scan) {
+        private bool ParsePDF417N(char[] scan, bool limited = false) {
             bool succeed = true;
+            bool limitedsucceed = false;
             if (scan[0] != 'N' && scan[0] != '1') {
                 return false;
             }
@@ -344,21 +367,26 @@ namespace CAC {
             _version = version;
             //succeed &= PDTDecode.TryGetValue(pdtc, out _pdtc);
             succeed &= edipi.TryConvertFromBase32(out ulong? dodid);
+            if (succeed)
+                limitedsucceed = true;
             succeed &= dob.TryConvertFromBase32(out ulong? dobdays);
             succeed &= dobdays.TryConvertToDateTime(out _dob);
             succeed &= PersonnelCCDecode.TryGetValue(pcc, out PersonCategoryCode personCategoryCode);
             succeed &= BranchDecode.TryGetValue(branch, out BranchCode branchCode);
-            succeed &= Int16.TryParse(paygrade.ToString().Trim(), out short gradeout);
+            if (!short.TryParse(new string(paygrade).Trim(), out short gradeout))
+                gradeout = 0;
             succeed &= issue.TryConvertFromBase32(out ulong? issuedays);
             succeed &= issuedays.TryConvertToDateTime(out _issue);
             succeed &= exp.TryConvertFromBase32(out ulong? expdays);
             succeed &= expdays.TryConvertToDateTime(out _exp);
-            if (succeed) {
-                //pdi.TryConvertFromBase32(out ulong? pdidigits);
-                //_pdi = pdidigits.ToString();
+            if (limitedsucceed) {
                 _edipi = dodid.ToString();
                 _firstname = new string(firstname).Trim();
                 _surname = new string(lastname).Trim();
+            }
+            if (succeed) {
+                //pdi.TryConvertFromBase32(out ulong? pdidigits);
+                //_pdi = pdidigits.ToString();
                 _rank = new string(rank).Trim();
                 _payplan = new string(payplan).Trim();
                 _grade = gradeout;
@@ -370,8 +398,9 @@ namespace CAC {
             }
             return succeed;
         }
-        private bool ParsePDF417M(char[] scan) {
+        private bool ParsePDF417M(char[] scan, bool limited = false) {
             bool succeed = true;
+            bool limitedsucceed = false;
             if (scan[0] != 'M') {
                 return false;
             }
@@ -393,20 +422,25 @@ namespace CAC {
             char instance = scan[98];
             _version = version;
             succeed &= edipi.TryConvertFromBase32(out ulong? dodid);
+            if (succeed)
+                limitedsucceed = true;
             succeed &= dob.TryConvertFromBase32(out ulong? dobdays);
             succeed &= dobdays.TryConvertToDateTime(out _dob);
             succeed &= PersonnelCCDecode.TryGetValue(pcc, out PersonCategoryCode personCategoryCode);
             succeed &= BranchDecode.TryGetValue(branch, out BranchCode branchCode);
-            succeed &= Int16.TryParse(new string(paygrade).Trim(), out short gradeout);
+            if (!short.TryParse(new string(paygrade).Trim(), out short gradeout))
+                gradeout = 0;
             succeed &= issue.TryConvertFromBase32(out ulong? issuedays);
             succeed &= issuedays.TryConvertToDateTime(out _issue);
             succeed &= exp.TryConvertFromBase32(out ulong? expdays);
             succeed &= expdays.TryConvertToDateTime(out _exp);
-            if (succeed) {
+            if (limitedsucceed) {
                 _edipi = dodid.ToString();
                 _firstname = new string(firstname).Trim();
                 _middleinitial = middleinitial;
                 _surname = new string(lastname).Trim();
+            }
+            if (succeed) {
                 _pcc = personCategoryCode;
                 _branch = branchCode;
                 _rank = new string(rank).Trim();
